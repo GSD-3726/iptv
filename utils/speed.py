@@ -39,6 +39,34 @@ default_ipv6_result = {
 }
 
 
+# ===================== 新增：开始运行输出函数 =====================
+def print_startup_info():
+    """打印程序启动信息，包含核心配置和依赖状态"""
+    print("=" * 60)
+    print("🎬 流媒体测速程序开始运行")
+    print("=" * 60)
+    # 打印核心测速配置
+    print(f"🔧 核心配置：")
+    print(f"   - 测速超时时间：{speed_test_timeout} 秒")
+    print(f"   - 开启域名过滤缓存：{'是' if speed_test_filter_host else '否'}")
+    print(f"   - 开启分辨率过滤：{'是' if open_filter_resolution else '否'}")
+    if open_filter_resolution:
+        print(f"     ↳ 分辨率范围：{min_resolution_value} - {max_resolution_value} 像素")
+    print(f"   - 开启速度过滤：{'是' if open_filter_speed else '否'}")
+    if open_filter_speed:
+        print(f"     ↳ 最低要求速度：{min_speed_value} MB/s")
+    print(f"   - 开启备用源兼容：{'是' if open_supply else '否'}")
+    print(f"   - IPv6默认延迟：{default_ipv6_delay} ms")
+    print(f"   - IPv6默认分辨率：{default_ipv6_resolution}")
+    # 检查并打印FFmpeg状态（复用原有检测函数）
+    print(f"📦 依赖状态：")
+    ffmpeg_installed = check_ffmpeg_installed_status()
+    print(f"   - FFmpeg安装状态：{'✅ 已安装（支持码率解析/分辨率检测）' if ffmpeg_installed else '❌ 未安装（部分功能受限）'}")
+    print("=" * 60)
+    print(f"🚀 开始执行测速任务...\n")
+# ==================================================================
+
+
 async def get_speed_with_download(url: str, headers: dict = None, session: ClientSession = None,
                                   timeout: int = speed_test_timeout) -> dict[
     str, float | None]:
@@ -334,10 +362,6 @@ def check_ffmpeg_installed_status():
     except Exception as e:
         print(e)
     finally:
-        if status:
-            print(t("msg.ffmpeg_installed"))
-        else:
-            print(t("msg.ffmpeg_not_installed"))
         return status
 
 
@@ -547,3 +571,11 @@ def clear_cache():
     """
     global cache
     cache = {}
+
+
+# ===================== 新增：程序主执行入口（触发启动输出） =====================
+if __name__ == "__main__":
+    # 打印启动信息
+    print_startup_info()
+    # 此处可添加你的测速任务执行代码
+    # 示例：asyncio.run(your_speed_test_task())
