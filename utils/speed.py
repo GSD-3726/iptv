@@ -1,29 +1,142 @@
-import random
-import requests
-from lxml import etree
-import os
-import threading
-import time
-import sys
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-# 如需使用代理请取消注释，确保proxyTest.py存在
-# from proxyTest import get_valid_proxies
-
-# ========== 新增：代码B的核心测速函数（加_a后缀避免命名冲突） ==========
 import asyncio
+import http.cookies
+import json
 import re
 import subprocess
 from time import time
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
+
 import m3u8
 from aiohttp import ClientSession, TCPConnector
+from multidict import CIMultiDictProxy
 
-def _parse_time_to_seconds_a(t: str) -> float:
-    """解析时间字符串为秒（避免命名冲突）"""
+# 注意：以下导入需确保你的项目目录结构正确，若运行报错需检查utils模块路径
+import utils.constants as constants
+from utils.config import config
+from utils.i18n import t
+from utils.requests.tools import headers as request_headers
+from utils.tools import get_resolution_value
+from utils.types import TestResult, ChannelTestResult, TestResultCacheData
+
+# 全局配置（原有逻辑不变）
+http.cookies._is_legal_key = lambda _: True
+cache: TestResultCacheData = {}
+speed_test_timeout = config.speed_test_timeout
+speed_test_filter_host = config.speed_test_filter_host
+open_filter_resolution = config.open_filter_resolution
+min_resolution_value = config.min_resolution_value
+max_resolution_value = config.max_resolution_value
+open_supply = config.open_supply
+open_filter_speed = config.open_filter_speed
+min_speed_value = config.min_speed
+m3u8_headers = ['application/x-mpegurl', 'application/vnd.apple.mpegurl', 'audio/mpegurl', 'audio/x-mpegurl']
+default_ipv6_delay = 0.1
+default_ipv6_resolution = "1920x1080"
+default_ipv6_result = {
+    'speed': float("inf"),
+    'delay': default_ipv6_delay,
+    'resolution': default_ipv6_resolution
+}
+
+
+async def get_speed_with_download(url: str, headers: dict = None, session: ClientSession = None,
+                                  timeout: int = speed_test_timeout) -> dict[
+    str, float | None]:
+    """
+    Get the speed of the url with a total timeout（原有逻辑未修改）
+    """
+    start_time = time()
+    delay = -1
+    total_size = 0
+    if session is None:
+        session = ClientSession(connector=TCPConnector(ssl=False), trust_env=True)
+        created_session = True
+    else:
+        created_session = False
+    try:
+        async with session.get(url, headers=headers, timeout=timeout) as response:
+            if response.status != 200:
+                raise Exception("Invalid response")
+            delay = int(round((time() - start_time) * 1000))
+            async for chunk in response.content.iter_any():
+                if chunk:
+                    total_size += len(chunk)
+    except:
+        pass
+    finally:
+        total_time = time() - start_time
+        if created_session:
+            await session.close()
+        return {
+            'speed': total_size / total_time / 1024 / 1024,
+            'delay': delay,
+            'size': total_size,
+            'time': total_time,
+        }
+
+
+async def get_headers(url: str, headers: dict = None, session: ClientSession = None, timeout: int = 5) -> \
+        CIMultiDictProxy[str] | dict[
+            any, any]:
+    """
+    Get the headers of the url（原有逻辑未修改）
+    """
+    if session is None:
+        session = ClientSession(connector=TCPConnector(ssl=False), trust_env=True)
+        created_session = True
+    else:
+        created_session = False
+    res_headers = {}
+    try:
+        async with session.head(url, headers=headers, timeout=timeout) as response:
+            res_headers = response.headers
+    except:
+        pass
+    finally:
+        if created_session:
+            await session.close()
+        return res_headers
+
+
+async def get_url_content(url: str, headers: dict = None, session: ClientSession = None,
+                          timeout: int = speed_test_timeout) -> str:
+    """
+    Get the content of the url（原有逻辑未修改）
+    """
+    if session is None:
+        session = ClientSession(connector=TCPConnector(ssl=False), trust_env=True)
+        created_session = True
+    else:
+        created_session = False
+    content = ""
+    try:
+        async with session.get(url, headers=headers, timeout=timeout) as response:
+            if response.status == 200:
+                content = await response.text()
+            else:
+                raise Exception("Invalid response")
+    except:
+        pass
+    finally:
+        if created_session:
+            await session.close()
+        return content
+
+
+def check_m3u8_valid(headers: CIMultiDictProxy[str] | dict[any, any]) -> bool:
+    """
+    Check if the m3u8 url is valid（原有逻辑未修改）
+    """
+    content_type = headers.get('Content-Type', '').lower()
+    if not content_type:
+        return False
+    return any(item in content_type for item in m3u8_headers)
+
+
+def _parse_time_to_seconds(t: str) -> float:
+    """
+    Parse time string to seconds（原有逻辑未修改）
+    """
     if not t:
         return 0.0
     parts = [p.strip() for p in t.split(':') if p.strip() != ""]
@@ -37,9 +150,13 @@ def _parse_time_to_seconds_a(t: str) -> float:
     except Exception:
         return 0.0
 
-def _try_extract_speed_from_ffmpeg_output_a(output: str) -> float | None:
-    """从ffmpeg输出提取速度（避免命名冲突）"""
-    def parse_size_value_a(value_str: str, unit: str | None) -> float:
+
+def _try_extract_speed_from_ffmpeg_output(output: str) -> float | None:
+    """
+    Try to extract speed from ffmpeg output（仅优化解析优先级，优先用流媒体真实码率）
+    """
+
+    def parse_size_value(value_str: str, unit: str | None) -> float:
         try:
             val = float(value_str)
         except Exception:
@@ -57,18 +174,28 @@ def _try_extract_speed_from_ffmpeg_output_a(output: str) -> float | None:
             return val * 1024.0 * 1024.0
         return val
 
+    # ========== 测速准确度优化：优先解析ffmpeg的bitrate（真实流媒体码率，最贴近实际播放速度） ==========
+    try:
+        m_bitrate = re.search(r"bitrate=\s*([0-9\.]+)\s*k?bits/s", output)
+        if m_bitrate:
+            kbps = float(m_bitrate.group(1))
+            return kbps / 8.0 / 1024.0  # kbps → MB/s（1MB=8192kb）
+    except Exception:
+        pass
+
+    # 原有解析逻辑（兜底，保留不变）
     try:
         total_bytes = 0.0
         m_video = re.search(r"video:\s*([0-9]+(?:\.[0-9]+)?)\s*(KiB|MiB|kB|B|kb|KB)?", output, re.IGNORECASE)
         m_audio = re.search(r"audio:\s*([0-9]+(?:\.[0-9]+)?)\s*(KiB|MiB|kB|B|kb|KB)?", output, re.IGNORECASE)
         if m_video:
-            total_bytes += parse_size_value_a(m_video.group(1), m_video.group(2))
+            total_bytes += parse_size_value(m_video.group(1), m_video.group(2))
         if m_audio:
-            total_bytes += parse_size_value_a(m_audio.group(1), m_audio.group(2))
+            total_bytes += parse_size_value(m_audio.group(1), m_audio.group(2))
 
         m_time = re.search(r"time=\s*([0-9:\.]+)", output)
         if total_bytes > 0 and m_time:
-            secs = _parse_time_to_seconds_a(m_time.group(1))
+            secs = _parse_time_to_seconds(m_time.group(1))
             if secs > 0:
                 return total_bytes / secs / 1024.0 / 1024.0
     except Exception:
@@ -80,34 +207,151 @@ def _try_extract_speed_from_ffmpeg_output_a(output: str) -> float | None:
         m_time = re.search(r"time=\s*([0-9:\.]+)", output)
         size_bytes = 0.0
         if m_lsize and m_lsize.group(1).upper() != "N/A":
-            size_bytes = parse_size_value_a(m_lsize.group(1), m_lsize.group(2))
+            size_bytes = parse_size_value(m_lsize.group(1), m_lsize.group(2))
         elif m_size:
-            size_bytes = parse_size_value_a(m_size.group(1), m_size.group(2))
+            size_bytes = parse_size_value(m_size.group(1), m_size.group(2))
         if size_bytes > 0 and m_time:
-            secs = _parse_time_to_seconds_a(m_time.group(1))
+            secs = _parse_time_to_seconds(m_time.group(1))
             if secs > 0:
                 return size_bytes / secs / 1024.0 / 1024.0
     except Exception:
         pass
 
-    try:
-        m_bitrate = re.search(r"bitrate=\s*([0-9\.]+)\s*k?bits/s", output)
-        if m_bitrate:
-            kbps = float(m_bitrate.group(1))
-            return kbps / 8.0 / 1024.0
-    except Exception:
-        pass
-
     return None
 
-async def ffmpeg_url_a(url, headers=None, timeout=10):
-    """执行ffmpeg获取输出（避免命名冲突）"""
-    headers_str = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
 
-    args = ["ffmpeg", "-t", str(timeout)]
+async def get_result(url: str, headers: dict = None, resolution: str = None,
+                     filter_resolution: bool = config.open_filter_resolution,
+                     timeout: int = speed_test_timeout) -> dict[str, float | None]:
+    """
+    Get the test result of the url（仅优化测速准确度，其余逻辑不变）
+    """
+    info = {'speed': 0, 'delay': -1, 'resolution': resolution}
+    location = None
+    try:
+        url = quote(url, safe=':/?$&=@[]%').partition('$')[0]
+        async with ClientSession(connector=TCPConnector(ssl=False), trust_env=True) as session:
+            res_headers = await get_headers(url, headers, session)
+            location = res_headers.get('Location')
+            if location:
+                info.update(await get_result(location, headers, resolution, filter_resolution, timeout))
+            else:
+                url_content = await get_url_content(url, headers, session, timeout)
+                if url_content:
+                    m3u8_obj = m3u8.loads(url_content)
+                    playlists = m3u8_obj.playlists
+                    segments = m3u8_obj.segments
+                    if playlists:
+                        best_playlist = max(m3u8_obj.playlists, key=lambda p: p.stream_info.bandwidth)
+                        playlist_url = urljoin(url, best_playlist.uri)
+                        playlist_content = await get_url_content(playlist_url, headers, session, timeout)
+                        if playlist_content:
+                            media_playlist = m3u8.loads(playlist_content)
+                            segment_urls = [urljoin(playlist_url, segment.uri) for segment in media_playlist.segments]
+                    else:
+                        segment_urls = [urljoin(url, segment.uri) for segment in segments]
+                    if not segment_urls:
+                        raise Exception("Segment urls not found")
+                    # ========== 测速准确度优化1：跳过前1个初始化片段，取后续5个有效片段 ==========
+                    sample_segments = segment_urls[1:6] if len(segment_urls) > 1 else segment_urls
+                    start_time = time()
+                    tasks = [get_speed_with_download(ts_url, headers, session, timeout) for ts_url in sample_segments]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    # ========== 测速准确度优化2：过滤有效结果，按片段大小加权计算速度 ==========
+                    valid_results = [r for r in results if isinstance(r, dict) and r['time'] > 0 and r['size'] > 0]
+                    if valid_results:
+                        total_size = sum(r['size'] for r in valid_results)
+                        # 加权时间 = 每个片段的(大小/总大小) * 片段耗时，大片段占比更高
+                        weighted_time = sum((r['size'] / total_size) * r['time'] for r in valid_results)
+                        info['speed'] = total_size / weighted_time / 1024 / 1024 if weighted_time > 0 else 0
+                        # 延迟取有效片段的平均延迟，排除无效值
+                        valid_delays = [r['delay'] for r in valid_results if r['delay'] > 0]
+                        info['delay'] = int(round(sum(valid_delays) / len(valid_delays))) if valid_delays else int(round((time() - start_time) * 1000))
+                    else:
+                        info['speed'] = 0
+                        info['delay'] = int(round((time() - start_time) * 1000))
+                else:
+                    res_info = await get_speed_with_download(url, headers, session, timeout)
+                    info.update({'speed': res_info['speed'], 'delay': res_info['delay']})
+                try:
+                    if round(info['speed'], 2) == 0 and info['delay'] != -1:
+                        ff_out = await ffmpeg_url(url, headers, timeout)
+                        if ff_out:
+                            parsed_speed = _try_extract_speed_from_ffmpeg_output(ff_out)
+                            if parsed_speed is not None and parsed_speed > 0:
+                                info['speed'] = parsed_speed
+                            try:
+                                _, parsed_resolution = get_video_info(ff_out)
+                                if parsed_resolution:
+                                    info['resolution'] = parsed_resolution
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+    except:
+        pass
+    finally:
+        if not info['resolution'] and filter_resolution and not location and info['delay'] != -1:
+            info['resolution'] = await get_resolution_ffprobe(url, headers, timeout)
+        return info
+
+
+async def get_delay_requests(url, timeout=speed_test_timeout, proxy=None):
+    """
+    Get the delay of the url by requests（原有逻辑未修改）
+    """
+    async with ClientSession(
+            connector=TCPConnector(ssl=False), trust_env=True
+    ) as session:
+        start = time()
+        end = None
+        try:
+            async with session.get(url, timeout=timeout, proxy=proxy) as response:
+                if response.status == 404:
+                    return -1
+                content = await response.read()
+                if content:
+                    end = time()
+                else:
+                    return -1
+        except Exception as e:
+            return -1
+        return int(round((end - start) * 1000)) if end else -1
+
+
+def check_ffmpeg_installed_status():
+    """
+    Check ffmpeg is installed（原有逻辑未修改）
+    """
+    status = False
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        status = result.returncode == 0
+    except FileNotFoundError:
+        status = False
+    except Exception as e:
+        print(e)
+    finally:
+        if status:
+            print(t("msg.ffmpeg_installed"))
+        else:
+            print(t("msg.ffmpeg_not_installed"))
+        return status
+
+
+async def ffmpeg_url(url, headers=None, timeout=10):
+    """
+    Get the ffmpeg output of the url（仅优化采样参数，提升解析准确度）
+    """
+    headers_str = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+
+    args = ["ffmpeg", "-t", "2"]  # ========== 测速准确度优化：仅采样2秒，足够计算码率，减少耗时 ==========
     if headers_str:
         args += ["-headers", headers_str]
-    args += ["-http_persistent", "0", "-stats", "-i", url, "-f", "null", "-"]
+    args += ["-http_persistent", "0", "-stats", "-i", url, "-f", "null", "-",
+             "-hide_banner", "-loglevel", "stats"]  # 隐藏无关输出，仅保留统计信息
 
     proc = None
     try:
@@ -132,310 +376,174 @@ async def ffmpeg_url_a(url, headers=None, timeout=10):
         if proc:
             await proc.wait()
 
-async def get_speed_with_download_a(url: str, headers: dict = None, timeout: int = 10) -> dict[str, float | None]:
-    """异步下载测速（避免命名冲突）"""
-    start_time = time()
-    delay = -1
-    total_size = 0
-    session = ClientSession(connector=TCPConnector(ssl=False), trust_env=True)
+
+async def get_resolution_ffprobe(url: str, headers: dict = None, timeout: int = speed_test_timeout) -> str | None:
+    """
+    Get the resolution of the url by ffprobe（仅优化兜底逻辑，避免空分辨率导致测速结果过滤误判）
+    """
+    resolution = None
+    proc = None
     try:
-        async with session.get(url, headers=headers, timeout=timeout) as response:
-            if response.status != 200:
-                raise Exception("Invalid response")
-            delay = int(round((time() - start_time) * 1000))
-            async for chunk in response.content.iter_any():
-                if chunk:
-                    total_size += len(chunk)
+        probe_args = [
+            'ffprobe',
+            '-v', 'error',
+            '-headers', ''.join(f'{k}: {v}\r\n' for k, v in headers.items()) if headers else '',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height,codec_type',  # 增加codec_type判断是否为视频流
+            "-of", 'json',
+            url
+        ]
+        proc = await asyncio.create_subprocess_exec(*probe_args, stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.PIPE)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        video_stream = json.loads(out.decode('utf-8'))["streams"][0]
+        # ========== 测速准确度优化：兜底纯音频流/分辨率为0的情况，避免空值 ==========
+        if video_stream.get("codec_type") != "video" or video_stream.get("width") == 0 or video_stream.get("height") == 0:
+            return "音频流"  # 纯音频流标记，避免空分辨率被过滤
+        resolution = f"{video_stream['width']}x{video_stream['height']}"
     except:
-        pass
+        if proc:
+            proc.kill()
     finally:
-        total_time = time() - start_time
-        await session.close()
-        return {
-            'speed': total_size / total_time / 1024 / 1024 if total_time > 0 else 0,
-            'delay': delay,
-            'size': total_size,
-            'time': total_time,
-        }
+        if proc:
+            await proc.wait()
+        return resolution
 
-async def get_m3u8_speed_a(url: str, headers: dict = None, timeout: int = 10) -> float:
-    """获取m3u8链接的测速结果（适配代码A）"""
+
+def get_video_info(video_info):
+    """
+    Get the video info（原有逻辑未修改）
+    """
+    frame_size = -1
+    resolution = None
+    if video_info is not None:
+        info_data = video_info.replace(" ", "")
+        matches = re.findall(r"frame=(\d+)", info_data)
+        if matches:
+            frame_size = int(matches[-1])
+        match = re.search(r"(\d{3,4}x\d{3,4})", video_info)
+        if match:
+            resolution = match.group(0)
+    return frame_size, resolution
+
+
+async def check_stream_delay(url_info):
+    """
+    Check the stream delay（原有逻辑未修改）
+    """
     try:
-        # 下载并解析M3U8文件
-        async with ClientSession(connector=TCPConnector(ssl=False), trust_env=True) as session:
-            async with session.get(url, headers=headers, timeout=timeout) as response:
-                if response.status != 200:
-                    return 0.0
-                m3u8_content = await response.text()
-        
-        m3u8_obj = m3u8.loads(m3u8_content)
-        playlists = m3u8_obj.playlists
-        segments = m3u8_obj.segments
-        segment_urls = []
-
-        # 处理多级M3U8（选择带宽最高的子playlist）
-        if playlists:
-            best_playlist = max(playlists, key=lambda p: p.stream_info.bandwidth)
-            playlist_url = urljoin(url, best_playlist.uri)
-            async with ClientSession(connector=TCPConnector(ssl=False), trust_env=True) as session:
-                async with session.get(playlist_url, headers=headers, timeout=timeout) as response:
-                    if response.status == 200:
-                        playlist_content = await response.text()
-                        media_playlist = m3u8.loads(playlist_content)
-                        segment_urls = [urljoin(playlist_url, seg.uri) for seg in media_playlist.segments]
-        else:
-            segment_urls = [urljoin(url, seg.uri) for seg in segments]
-
-        # 测速逻辑：优先测TS片段，无片段则测M3U8本身
-        if not segment_urls:
-            res = await get_speed_with_download_a(url, headers, timeout)
-            speed = res['speed']
-        else:
-            # 测试前5个TS片段（异步并发）
-            tasks = [get_speed_with_download_a(ts_url, headers, timeout) for ts_url in segment_urls[:5]]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            total_size = sum(r['size'] for r in results if isinstance(r, dict))
-            total_time = sum(r['time'] for r in results if isinstance(r, dict))
-            
-            speed = total_size / total_time / 1024 / 1024 if total_time > 0 else 0.0
-
-            # 片段测速为0时，用FFmpeg辅助测速
-            if round(speed, 2) == 0:
-                ff_out = await ffmpeg_url_a(url, headers, timeout)
-                if ff_out:
-                    parsed_speed = _try_extract_speed_from_ffmpeg_output_a(ff_out)
-                    if parsed_speed is not None and parsed_speed > 0:
-                        speed = parsed_speed
-
-        return speed
+        url = url_info["url"]
+        video_info = await ffmpeg_url(url)
+        if video_info is None:
+            return -1
+        frame, resolution = get_video_info(video_info)
+        if frame is None or frame == -1:
+            return -1
+        url_info["resolution"] = resolution
+        return url_info, frame
     except Exception as e:
-        print(f"测速失败 {url}: {e}")
-        return 0.0
-# ========== 新增结束 ==========
+        print(e)
+        return -1
 
-def get_url(name):
-    # proxy = get_valid_proxies()  # 如需代理请取消注释
-    user_agents = [
-        'Mozilla/5.0 (Windows; U; Windows NT 5.1; it; rv:1.8.1.11) Gecko/20071127 Firefox/2.0.0.11',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:117.0) Gecko/20100101 Firefox/117.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.179 Safari/537.36 Edg/116.0.1938.69',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_6_3) AppleWebKit/537.36 (KHTML, like Gecko) Version/15.6 Safari/537.36',
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-        'Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.179 Mobile Safari/537.36',
-        'Mozilla/5.0 (Android 12; Mobile; rv:117.0) Gecko/117.0 Firefox/117.0',
-        'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
-        'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.179 Safari/537.36',
-        'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:117.0) Gecko/20100101 Firefox/117.0',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/116.0.5845.179 Chrome/116.0.5845.179 Safari/537.36',
-        'Mozilla/5.0 (compatible; Konqueror/4.14; Linux) KHTML/4.14.2 (like Gecko)',
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Epiphany/42.3 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.179 Safari/537.36 OPR/103.0.4928.47",
-    ]
-    user_agent = random.choice(user_agents)
-    # 配置ChromeOptions以启用无头模式
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument(f"user-agent={user_agent}")
-    # chrome_options.add_argument(f"--proxy-server={proxy}")  # 如需代理请取消注释
 
-    # 设置ChromeDriver
-    driver = webdriver.Chrome(options=chrome_options)
+def get_avg_result(result) -> TestResult:
+    """
+    Get average test result（原有逻辑未修改）
+    """
+    return {
+        'speed': sum(item['speed'] or 0 for item in result) / len(result),
+        'delay': max(
+            int(sum(item['delay'] or -1 for item in result) / len(result)), -1),
+        'resolution': max((item['resolution'] for item in result), key=get_resolution_value)
+    }
 
-    try:
-        # 打开指定页面
-        driver.get('http://tonkiang.us/')
-        # 等待直到 ID 为 'search' 的元素可被点击
-        username_input = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, 'search'))
-        )
-        username_input.send_keys(f'{name}')
-        submit_button = driver.find_element(By.NAME, 'Submit')
-        submit_button.click()
-    except Exception as e:
-        print(f"找不到元素: {e}")
 
-    try:
-        # 获取页面的源代码
-        page_source = driver.page_source
-        m3u8_list = []
-        # 将 HTML 转换为 Element 对象
-        root = etree.HTML(page_source)
-        result_divs = root.xpath("//div[@class='resultplus']")
-        print(f"获取数据: {len(result_divs)}")
-        # 提取m3u8链接
-        for div in result_divs:
-            for element in div.xpath(".//tba"):
-                if element.text is not None:
-                    m3u8_url = element.text.strip()
-                    print(m3u8_url)
-                    m3u8_list.append(m3u8_url)
-                    with open('m3u8_list.txt', 'a', encoding='utf-8') as f:
-                        f.write(f'{name},{m3u8_url}' + '\n')
-    except requests.exceptions.RequestException as e:
-        print(f"Error: 请求异常. Exception: {e}")
-        pass
-
-    # 关闭WebDriver
-    driver.quit()
-    return m3u8_list
-
-# ========== 核心修改：替换download_m3u8的测速逻辑 ==========
-def download_m3u8(url, name, initial_url=None):
-    try:
-        # 验证M3U8链接有效性（仅下载头部，不完整下载）
-        response = requests.get(url, stream=True, timeout=15)
-        response.raise_for_status()  # 检查请求是否成功
-        m3u8_content = response.text
-    except requests.exceptions.Timeout as e:
-        print(f"{url}\nError: 请求超时. Exception: {e}")
-        return
-    except requests.exceptions.RequestException as e:
-        print(f"{url}\nError: 请求异常. Exception: {e}")
-        return
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return
+def get_speed_result(key: str) -> TestResult:
+    """
+    Get the speed result of the url from cache（原有逻辑未修改）
+    """
+    if key in cache:
+        return get_avg_result(cache[key])
     else:
-        # 使用代码B的异步测速逻辑
-        try:
-            # 执行异步测速函数（同步调用异步）
-            average_speed = asyncio.run(get_m3u8_speed_a(url, headers=None, timeout=15))
-            print(f"---{name}---Average Download Speed: {average_speed:.2f} MB/s")
-        except Exception as e:
-            print(f"测速异常 {url}: {e}")
-            average_speed = 0.0
+        return {'speed': 0, 'delay': -1, 'resolution': 0}
 
-        # 速度阈值判断（保留原逻辑）
-        if average_speed >= speed:
-            valid_url = initial_url if initial_url is not None else url
-            if not os.path.exists(f'{TV_name}'):
-                os.makedirs(f'{TV_name}')
-            with open(os.path.join(f'{TV_name}', f'{name}.txt'), 'a', encoding='utf-8') as file:
-                file.write(f'{name},{valid_url}\n')
-            print(f"---{name}---链接有效源已保存---\n"
-                  f"----{valid_url}---")
-            return
 
-def detectLinks(name, m3u8_list):
-    thread = []
-    for m3u8_url in m3u8_list:
-        t = threading.Thread(target=download_m3u8, args=(m3u8_url, name,))
-        t.daemon = True  # 设置为守护线程
-        t.start()
-        thread.append(t)
-    # 等待所有线程完成
-    for t in thread:
-        try:
-            print(f"Waiting for thread {t} to finish")
-            t.join(timeout=10)  # 等待线程超时
-        except Exception as e:
-            print(f"Thread {t.name} raised an exception: {e}")
+async def get_speed(data, headers=None, ipv6_proxy=None, filter_resolution=open_filter_resolution,
+                    timeout=speed_test_timeout, logger=None, callback=None) -> TestResult:
+    """
+    Get the speed (response time and resolution) of the url（原有逻辑未修改）
+    """
+    url = data['url']
+    resolution = data['resolution']
+    result: TestResult = {'speed': 0, 'delay': -1, 'resolution': resolution}
+    headers = {**request_headers, **(headers or {})}
+    try:
+        cache_key = data['host'] if speed_test_filter_host else url
+        if cache_key and cache_key in cache:
+            result = get_avg_result(cache[cache_key])
+        else:
+            if data['ipv_type'] == "ipv6" and ipv6_proxy:
+                result.update(default_ipv6_result)
+            elif constants.rt_url_pattern.match(url) is not None:
+                start_time = time()
+                if not result['resolution'] and filter_resolution:
+                    result['resolution'] = await get_resolution_ffprobe(url, headers, timeout)
+                result['delay'] = int(round((time() - start_time) * 1000))
+                if result['resolution'] is not None:
+                    result['speed'] = float("inf")
+            else:
+                result.update(await get_result(url, headers, resolution, filter_resolution, timeout))
+            if cache_key:
+                cache.setdefault(cache_key, []).append(result)
+    finally:
+        if callback:
+            callback()
+        if logger:
+            logger.info(
+                f"Name: {data.get('name')}, URL: {data.get('url')}, From: {data.get('origin')}, IPv_Type: {data.get('ipv_type')}, Location: {data.get('location')}, ISP: {data.get('isp')}, Date: {data['date']}, Delay: {result.get('delay') or -1} ms, Speed: {result.get('speed') or 0:.2f} M/s, Resolution: {result.get('resolution')}"
+            )
+        return result
 
-def mer_links(tv):
-    # 获取文件夹中的所有 txt 文件
-    txt_files = [f for f in os.listdir(os.path.join(current_directory, f'{tv}'))]
-    print(txt_files)
-    # 打开合并后的文件
-    with open(output_file_path, 'a', encoding='utf-8') as output_file:
-        output_file.write(f'{tv},#genre#' + '\n')
-        for txt_file in txt_files:
-            file_path = os.path.join(os.path.join(current_directory, f'{tv}'), txt_file)
-            # 读取并写入内容
-            with open(file_path, 'r', encoding='utf-8') as input_file:
-                file_content = input_file.read()
-                output_file.write(file_content)
-                output_file.write('\n')
 
-    print(f'Merged content from {len(txt_files)} files into {output_file_path}')
+def get_sort_result(
+        results,
+        supply=open_supply,
+        filter_speed=open_filter_speed,
+        min_speed=min_speed_value,
+        filter_resolution=open_filter_resolution,
+        min_resolution=min_resolution_value,
+        max_resolution=max_resolution_value,
+        ipv6_support=True
+) -> list[ChannelTestResult]:
+    """
+    Get the sorted test results（原有逻辑未修改）
+    """
+    total_result = []
+    for result in results:
+        if not ipv6_support and result["ipv_type"] == "ipv6":
+            result.update(default_ipv6_result)
+        result_speed, result_delay, resolution = (
+            result.get("speed") or 0,
+            result.get("delay"),
+            result.get("resolution")
+        )
+        if result_delay == -1:
+            continue
+        if not supply:
+            if filter_speed and result_speed < min_speed:
+                continue
+            if filter_resolution and resolution:
+                resolution_value = get_resolution_value(resolution)
+                if resolution_value < min_resolution or resolution_value > max_resolution:
+                    continue
+        total_result.append(result)
+    total_result.sort(key=lambda item: item.get("speed") or 0, reverse=True)
+    return total_result
 
-def re_dup_ordered(filepath):
-    from collections import OrderedDict
-    # 读取文本文件
-    with open(filepath, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-    # 保持原始顺序的去重
-    unique_lines_ordered = list(OrderedDict.fromkeys(lines))
-    # 写回文件
-    with open(filepath, 'w', encoding='utf-8') as file:
-        file.writelines(unique_lines_ordered)
-    print('-----直播源去重完成！------')
 
-def re_dup(filepath):
-    # 读取文本文件
-    with open(filepath, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-
-    # 过滤掉包含 'null' 的行
-    filtered_lines = [line for line in lines if 'null' not in line]
-
-    # 字典去重
-    unique_lines = {}
-    for line in filtered_lines:
-        parts = line.strip().split(',')
-        if len(parts) == 2:
-            channel_name, url = parts[0].strip(), parts[1].strip()
-            if url not in unique_lines:
-                unique_lines[url] = line
-
-    # 写回文件
-    unique_lines_ordered = list(unique_lines.values())
-    with open(filepath, 'w', encoding='utf-8') as file:
-        file.writelines(unique_lines_ordered)
-    print('-----直播源去重完成！------')
-
-if __name__ == '__main__':
-    speed = 1  # 速度阈值（MB/s）
-    # 获取当前工作目录
-    current_directory = os.getcwd()
-    # 构造上级目录的路径
-    parent_dir = os.path.dirname(current_directory)
-    output_file_path = os.path.join(parent_dir, 'live.txt')
-    # 清空文件
-    with open(output_file_path, 'w', encoding='utf-8') as f:
-        pass
-    with open('m3u8_list.txt', 'w', encoding='utf-8') as file:
-        pass
-    tv_dict = {}
-    # 目标频道分类
-    TV_names = ['🇨🇳央视频道']
-    for TV_name in TV_names:
-        # 删除历史测试记录
-        if os.path.exists(TV_name):
-            import shutil
-            try:
-                shutil.rmtree(TV_name)
-                print(f"Folder '{TV_name}' deleted successfully.")
-            except OSError as e:
-                print(f"Error deleting folder '{TV_name}': {e}")
-        time.sleep(1)
-        # 创建目录
-        if not os.path.exists(TV_name):
-            os.makedirs(TV_name)
-        # 读取频道名称
-        with open(f'{TV_name}.txt', 'r', encoding='utf-8') as file:
-            names = [line.strip() for line in file]
-            for name in names:
-                m3u8_list = get_url(name)
-                tv_dict[name] = m3u8_list
-                print(name)
-            print('---------字典加载完成！------------')
-        # 多线程测速
-        for name, m3u8_list in tv_dict.items():
-            detectLinks(name, m3u8_list)
-        # 合并有效直播源
-        mer_links(TV_name)
-        tv_dict.clear()
-
-    time.sleep(10)
-    # 清理临时文件（代码B逻辑不生成video.ts，可注释）
-    if os.path.exists('video.ts'):
-        os.remove('video.ts')
-    # 直播源去重
-    re_dup_ordered(output_file_path)
-
-    sys.exit()
+def clear_cache():
+    """
+    Clear the speed test cache（原有逻辑未修改）
+    """
+    global cache
+    cache = {}
