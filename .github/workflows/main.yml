@@ -2,14 +2,12 @@ name: 'Update schedule'
 
 on:
   schedule:
-    # 每2小时运行一次
     - cron: '0 */2 * * *'
   workflow_dispatch:
     branches:
       - master
       - dev
       - gd
-
 jobs:
   push:
     runs-on: ${{ matrix.operating-system }}
@@ -20,56 +18,29 @@ jobs:
       - name: Set branch name
         id: vars
         run: echo "BRANCH_NAME=${{ github.repository_owner == 'Guovin' && 'gd' || 'master' }}" >> $GITHUB_ENV
-
-      - name: Checkout code
-        uses: actions/checkout@v4  # 升级到v4更稳定
+      - uses: actions/checkout@v3
         with:
           ref: ${{ env.BRANCH_NAME }}
-          fetch-depth: 0  # 确保能提交代码
-
-      - name: Install system dependencies
-        run: |
-          # 安装FFmpeg（测速依赖）
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          # 安装Chrome和ChromeDriver（selenium依赖）
-          sudo apt-get install -y wget unzip
-          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
-          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
-          wget https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip
-          unzip chromedriver-linux64.zip
-          sudo mv chromedriver-linux64/chromedriver /usr/local/bin/
-          sudo chmod +x /usr/local/bin/chromedriver
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+      - name: Run with setup-python 3.13
+        uses: actions/setup-python@v4
         with:
           python-version: '3.13'
-          cache: 'pipenv'  # 缓存pipenv依赖
-
+          update-environment: true
+          cache: 'pipenv'
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install pipenv
-        run: |
-          python -m pip install --upgrade pip
-          pip install --user pipenv
-          echo "$HOME/.local/bin" >> $GITHUB_PATH  # 确保pipenv在PATH中
-
-      - name: Install Python dependencies
-        run: |
-          pipenv --python 3.13
-          pipenv install --deploy --ignore-pipfile  # 强制使用Pipfile.lock
-
-      - name: Run live source update script
-        run: pipenv run dev  # 对应Pipfile中的dev脚本
-
-      - name: Commit and push changes
+        run: pip3 install --user pipenv
+      - name: Install dependecies
+        run: pipenv --python 3.13 && pipenv install --deploy
+      - name: Update
+        run: pipenv run dev
+      - name: Commit and push if changed
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .
-          # 仅当有变更时提交
           if ! git diff --staged --quiet; then
-            git commit -m "Github Action Auto Updated: $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin ${{ env.BRANCH_NAME }} --force
-          else
-            echo "No changes to commit"
+            git commit -m "Github Action Auto Updated"
+            git push --force
           fi
