@@ -4,20 +4,20 @@ CCTV-2,https://migu.188766.xyz/?migutoken=b72691164cc7676bc03717f637f8959a&id=CC
 CCTV-5,https://migu.188766.xyz/?migutoken=32b88473afb290068b01bc9975125fae&id=CCTV5&type=yy
 CCTV-5+,https://migu.188766.xyz/?migutoken=c336b1fa58440ae96671f4728b7ffd10&id=CCTV5p&type=yy
 CCTV-5+,https://migu.188766.xyz/?migutoken=f141fea1aa022499c48610385499ef18&id=CCTV5p&type=yy
-CCTV-6,https://migu.188766.xyz/?migutoken=da07526d27548f4bbf1b1c1651f89565&id=CCTV6&type=yy
 CCTV-6,https://migu.188766.xyz/?migutoken=4956ed14c307c4ac97f60671cb081bfc&id=CCTV6&type=yy
+CCTV-6,https://migu.188766.xyz/?migutoken=da07526d27548f4bbf1b1c1651f89565&id=CCTV6&type=yy
 CCTV-7,https://migu.188766.xyz/?migutoken=e2b59cb90ff6ae8128b1ec1f9c50314c&id=CCTV7&type=yy
-CCTV-8,https://migu.188766.xyz/?migutoken=3b137cffc353142c6d7f1a00bb407eb7&id=CCTV8&type=yy
 CCTV-8,https://migu.188766.xyz/?migutoken=7c1e29c197800da107cfb572a68e2e56&id=CCTV8&type=yy
+CCTV-8,https://migu.188766.xyz/?migutoken=3b137cffc353142c6d7f1a00bb407eb7&id=CCTV8&type=yy
 CCTV-9,https://migu.188766.xyz/?migutoken=3ac2cc8bff9ba38b60b1cf6be9cc2cba&id=CCTV9&type=yy
 CCTV-11,https://migu.188766.xyz/?migutoken=50679bf783d9523c4b1a1905e6ecef93&id=CCTV11&type=yy
 CCTV-12,https://migu.188766.xyz/?migutoken=18e102c03efcbeeb93a84e32e606e4ee&id=CCTV12&type=yy
-CCTV-13,https://cdn3.163189.xyz/163189/cctv13
-CCTV-13,https://migu.188766.xyz/?migutoken=203a8d0f6a75c00dd01254792112f154&id=CCTV13&type=yy
 CCTV-13,https://migu.188766.xyz/?migutoken=2f35f43c546c904ff2e2863ffa031828&id=CCTV13&type=yy
+CCTV-13,https://migu.188766.xyz/?migutoken=203a8d0f6a75c00dd01254792112f154&id=CCTV13&type=yy
+CCTV-13,https://cdn3.163189.xyz/163189/cctv13
 CCTV-13,https://event.pull.hebtv.com/jishi/cp1.m3u8
-CCTV-14,https://migu.188766.xyz/?migutoken=26f2ab9673cefb4e2fecff486a64321d&id=CCTV14&type=yy
 CCTV-14,https://migu.188766.xyz/?migutoken=5ec530e75fb2b35588a070e4726684a3&id=CCTV14&type=yy
+CCTV-14,https://migu.188766.xyz/?migutoken=26f2ab9673cefb4e2fecff486a64321d&id=CCTV14&type=yy
 CCTV-14,https://event.pull.hebtv.com/jishi/cp2.m3u8
 CCTV-17,https://migu.188766.xyz/?migutoken=16ff9fd054cf37692f0ff72a65f4dc1d&id=CCTV17&type=yy
 CETV-1,https://migu.188766.xyz/?migutoken=7f0b630af844551ebe8505554d18ef90&id=CETV1&type=yy
@@ -32,8 +32,8 @@ CETV-2,https://migu.188766.xyz/?migutoken=4d07bac23d004cc1621f378cb5e88fa2&id=CE
 浙江卫视,https://migu.188766.xyz/?migutoken=be5ca6c9c00dd9f4bb61f69a4714b6fc&id=z_jws&type=sz
 浙江卫视,https://migu.188766.xyz/?migutoken=56b63527667557be6a4290b68d4364f4&id=z_jws&type=sz
 湖南卫视,https://migu.188766.xyz/?migutoken=d6decb9f923e1bd30407a4c47246e616&id=hnws&type=sz
-湖南卫视,https://migu.188766.xyz/?migutoken=b450343702879b0ae0c6739c1ab49ad5&id=%E6%B9%96%E5%8D%97%E5%8D%AB%E8%A7%864K&pp=1
 湖南卫视,https://migu.188766.xyz/?migutoken=249090e05aebff6ab999e1f393ae4c21&id=%E6%B9%96%E5%8D%97%E5%8D%AB%E8%A7%864K&pp=1
+湖南卫视,https://migu.188766.xyz/?migutoken=b450343702879b0ae0c6739c1ab49ad5&id=%E6%B9%96%E5%8D%97%E5%8D%AB%E8%A7%864K&pp=1
 重庆卫视,http://iptv.huuc.edu.cn/hls/cqhd.m3u8
 重庆卫视,http://[2409:8087:3c02:0021:0000:0001:0000:100a]:6410/shandong_cabletv.live.zte.com////CHANNEL00000341/index.m3u8?IASHttpSessionId=
 重庆卫视,http://[2409:8087:1e02:20::1a]/PLTV/11/224/3221226171/index.m3u8?icpid=11&RTS=1762072229&from=24&hms_devid=544,550&online=1762070453&vqe=3
@@ -41,11 +41,11 @@ CETV-2,https://migu.188766.xyz/?migutoken=4d07bac23d004cc1621f378cb5e88fa2&id=CE
 广西卫视,https://hlscdn.liangtv.cn/live/de0f97348eb84f62aa6b7d8cf0430770/dd505d87880c478f901f38560ca4d4e6.m3u8
 海南卫视,https://migu.188766.xyz/?migutoken=ae4cf468d9957f5a887c9a1a7babbb2d&id=hn_hnws&type=sz
 河南卫视,https://migu.188766.xyz/?migutoken=05f4e70c78817b762dc8a3078e05ae03&id=%E6%B2%B3%E5%8D%97%E5%8D%AB%E8%A7%86%E9%AB%98%E6%B8%85&type=yy
-河南卫视,http://tvcdn.stream3.hndt.com/tv/65c4a6d5017e1000b2b6ea2500000000_transios/playlist.m3u8?wsSecret=ec1c1a377a153bd56a875f761383980d&wsTime=1769594444
 河南卫视,http://tvcdn.stream3.hndt.com/tv/65c4a6d5017e1000b2b6ea2500000000_transios/playlist.m3u8?wsSecret=1eb6d4d7300e36cfa113e2a596646d34&wsTime=1769601462
+河南卫视,http://tvcdn.stream3.hndt.com/tv/65c4a6d5017e1000b2b6ea2500000000_transios/playlist.m3u8?wsSecret=da3e2e29cac4ee50d60a290efd25e246&wsTime=1769608681
 内蒙古卫视,https://migu.188766.xyz/?migutoken=c7288e1e6c3da172925145b196cd6958&id=%E5%86%85%E8%92%99%E5%8F%A4%E5%8D%AB%E8%A7%86&pp=1
 陕西卫视,http://hlsbkmgsplive.miguvideo.com/migu/kailu/shan3xiws/57/20220809/index.m3u8?msisdn=&mtv_session=&HlsSubType=1&HlsProfileId=1&nphaid=0&encrypt=
 西藏卫视,http://php.jdshipin.com:8880/xztv.php?id=ws
 
 🕘️更新时间,#genre#
-2026-01-28 16:48:42,https://migu.188766.xyz/?migutoken=6585eea65e3309a16c9e503b71aa963d&id=CCTV1&type=yy
+2026-01-28 18:43:50,https://migu.188766.xyz/?migutoken=6585eea65e3309a16c9e503b71aa963d&id=CCTV1&type=yy
